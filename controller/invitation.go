@@ -15,7 +15,7 @@ import (
 
 // InvitationControllerConfiguration the Configuration for the InvitationController
 type InvitationControllerConfiguration interface {
-	GetInvitationAcceptedRedirectURL() string
+	GetInvitationAcceptedErrorRedirectURL() string
 }
 
 // InvitationController implements the invitation resource.
@@ -82,13 +82,13 @@ func (c *InvitationController) CreateInvite(ctx *app.CreateInviteInvitationConte
 }
 
 func (c *InvitationController) AcceptInvite(ctx *app.AcceptInviteInvitationContext) error {
-	redirectURL := c.config.GetInvitationAcceptedRedirectURL()
+	errorRedirectURL := c.config.GetInvitationAcceptedErrorRedirectURL()
 
 	currentIdentity, err := login.LoadContextIdentityIfNotDeprovisioned(ctx, c.app)
 	if err != nil {
 		errResponse := err.Error()
-		redirectURL, err = rest.AddParam(redirectURL, "error", errResponse)
-		ctx.ResponseData.Header().Set("Location", redirectURL)
+		errorRedirectURL, err = rest.AddParam(errorRedirectURL, "error", errResponse)
+		ctx.ResponseData.Header().Set("Location", errorRedirectURL)
 		return ctx.TemporaryRedirect()
 	}
 
@@ -99,16 +99,16 @@ func (c *InvitationController) AcceptInvite(ctx *app.AcceptInviteInvitationConte
 		}, "failed to accept invitation, invalid code")
 
 		errResponse := err.Error()
-		redirectURL, err = rest.AddParam(redirectURL, "error", errResponse)
-		ctx.ResponseData.Header().Set("Location", redirectURL)
+		errorRedirectURL, err = rest.AddParam(errorRedirectURL, "error", errResponse)
+		ctx.ResponseData.Header().Set("Location", errorRedirectURL)
 		return ctx.TemporaryRedirect()
 	}
 
-	_, err = c.app.InvitationService().Accept(ctx, currentIdentity.ID, acceptCode)
+	_, redirectURL, err := c.app.InvitationService().Accept(ctx, currentIdentity.ID, acceptCode)
 
 	if err != nil {
 		errResponse := err.Error()
-		redirectURL, err = rest.AddParam(redirectURL, "error", errResponse)
+		errorRedirectURL, err = rest.AddParam(errorRedirectURL, "error", errResponse)
 		if err != nil {
 			return err
 		}

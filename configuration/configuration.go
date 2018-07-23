@@ -49,7 +49,7 @@ const (
 	varLogLevel                        = "log.level"
 	varLogJSON                         = "log.json"
 	varEmailVerifiedRedirectURL        = "email.verify.url"
-	varInvitationAcceptedRedirectURL   = "invitation.accepted.url"
+	varInvitationAcceptedErrorRedirectURL   = "invitation.accepted.error.url"
 	varInternalUsersEmailAddressSuffix = "internal.users.email.address.domain"
 	varKeycloakTestsDisabled           = "keycloak.tests.disabled"
 	varIgnoreEmailInProd               = "ignore.email.prod"
@@ -126,6 +126,7 @@ const (
 	varWITURL                 = "wit.url"
 	varNotificationServiceURL = "notification.serviceurl"
 	varAuthURL                = "auth.url"
+	varF8UIURL                = "f8ui.url"
 
 	// sentry
 	varEnvironment = "environment"
@@ -607,6 +608,22 @@ func (c *ConfigurationData) GetAuthServiceURL() string {
 	}
 }
 
+// GetF8UIURL returns Service URL
+func (c *ConfigurationData) GetF8UIURL() string {
+	if c.v.IsSet(varF8UIURL) {
+		return c.v.GetString(varF8UIURL)
+	}
+
+	switch c.GetEnvironment() {
+	case prodEnvironment:
+		return "https://openshift.io"
+	case prodPreviewEnvironment:
+		return "https://prod-preview.openshift.io"
+	default:
+		return "http://localhost"
+	}
+}
+
 // GetServiceAccounts returns a map of service account configurations by service account ID
 // Default Service Account names and secrets used in Dev mode:
 // "fabric8-wit" : "witsecret"
@@ -759,8 +776,8 @@ func (c *ConfigurationData) GetEmailVerifiedRedirectURL() string {
 	return c.v.GetString(varEmailVerifiedRedirectURL)
 }
 
-func (c *ConfigurationData) GetInvitationAcceptedRedirectURL() string {
-	return c.v.GetString(varInvitationAcceptedRedirectURL)
+func (c *ConfigurationData) GetInvitationAcceptedErrorRedirectURL() string {
+	return c.v.GetString(varInvitationAcceptedErrorRedirectURL)
 }
 
 // GetPostgresHost returns the postgres host as set via default, config file, or environment variable

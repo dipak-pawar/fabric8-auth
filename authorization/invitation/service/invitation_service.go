@@ -25,6 +25,7 @@ import (
 
 type InvitationConfiguration interface {
 	GetAuthServiceURL() string
+	GetF8UIURL() string
 	GetWITURL() (string, error)
 	IsPostgresDeveloperModeEnabled() bool
 }
@@ -32,12 +33,15 @@ type InvitationConfiguration interface {
 type invitationServiceImpl struct {
 	base.BaseService
 	config InvitationConfiguration
+	wit.RemoteWITService
 }
 
 func NewInvitationService(context servicecontext.ServiceContext, config InvitationConfiguration) service.InvitationService {
 	return &invitationServiceImpl{
 		BaseService: base.NewBaseService(context),
-		config:      config}
+		config:      config,
+		RemoteWITService: &wit.RemoteWITServiceCaller{},
+	}
 }
 
 // Issue creates new invitations. The inviteTo parameter is the unique id of the organization, team, security group
@@ -334,21 +338,25 @@ func lookupSpaceName(ctx context.Context, witURL string, spaceID string) (string
 }
 
 // Accept processes an invitation acceptance click, and returns the resource ID of the resource or identity resource which the invitation is for
-func (s *invitationServiceImpl) Accept(ctx context.Context, currentIdentityID uuid.UUID, token uuid.UUID) (string, error) {
+func (s *invitationServiceImpl) Accept(ctx context.Context, currentIdentityID uuid.UUID, token uuid.UUID) (string, string, error) {
 	var resourceID string
+	var redirectPath string
 
 	// Locate the invitation
 	inv, err := s.Repositories().InvitationRepository().FindByAcceptCode(ctx, currentIdentityID, token)
-
 	if err != nil {
-		return resourceID, err
+		return resourceID, redirectPath, err
 	}
 
+	witURL, err := s.config.GetWITURL()
+	if err != nil {
+		return resourceID, redirectPath, err
+	}
 	// If this invitation is for an identity
 	if inv.InviteTo != nil {
 		inviteToIdentity, err := s.Repositories().Identities().Load(ctx, *inv.InviteTo)
 		if err != nil {
-			return resourceID, err
+			return resourceID, redirectPath, err
 		}
 
 		// If the invitation is for a membership, add a membership record
@@ -358,7 +366,7 @@ func (s *invitationServiceImpl) Accept(ctx context.Context, currentIdentityID uu
 
 		roles, err := s.Repositories().InvitationRepository().ListRoles(ctx, inv.InvitationID)
 		if err != nil {
-			return resourceID, err
+			return resourceID, redirectPath, err
 		}
 
 		// If the invitation includes role assignments, assign them
@@ -371,25 +379,40 @@ func (s *invitationServiceImpl) Accept(ctx context.Context, currentIdentityID uu
 
 			err = s.Repositories().IdentityRoleRepository().Create(ctx, ir)
 			if err != nil {
-				return resourceID, err
+				return resourceID, redirectPath, err
+			}
+		}
+
+		if inviteToIdentity.IdentityResource.ResourceType.Name == authorization.IdentityResourceTypeTeam {
+			if inviteToIdentity.IdentityResource.ParentResourceID != nil {
+				spaceName, userID, err := s.RemoteWITService.GetSpaceNameAndOwnedBy(ctx, witURL, *inviteToIdentity.IdentityResource.ParentResourceID)
+				userIDUUID, err := uuid.FromString(userID)
+				if err != nil {
+					return resourceID, redirectPath, err
+				}
+				user, err := s.Repositories().Identities().LoadWithUser(ctx, userIDUUID)
+				if err != nil {
+					return resourceID, redirectPath, err
+				}
+				redirectPath = fmt.Sprintf("%s/%s/%s", s.config.GetF8UIURL(), user.Username, spaceName)
 			}
 		}
 
 		// Delete the invitation
 		s.Repositories().InvitationRepository().Delete(ctx, inv.InvitationID)
 
-		// Return the identity ID
-		return inviteToIdentity.IdentityResourceID.String, nil
+		// Return the identity ID and redirect Path
+		return inviteToIdentity.IdentityResourceID.String, redirectPath, nil
 
 	} else if inv.ResourceID != nil {
 		inviteToResource, err := s.Repositories().ResourceRepository().Load(ctx, *inv.ResourceID)
 		if err != nil {
-			return resourceID, err
+			return resourceID, redirectPath, err
 		}
 
 		roles, err := s.Repositories().InvitationRepository().ListRoles(ctx, inv.InvitationID)
 		if err != nil {
-			return resourceID, err
+			return resourceID, redirectPath, err
 		}
 
 		for _, role := range roles {
@@ -401,16 +424,36 @@ func (s *invitationServiceImpl) Accept(ctx context.Context, currentIdentityID uu
 
 			err = s.Repositories().IdentityRoleRepository().Create(ctx, ir)
 			if err != nil {
-				return resourceID, err
+				return resourceID, redirectPath, err
 			}
 		}
+
+		spaceName, userID, err := s.RemoteWITService.GetSpaceNameAndOwnedBy(ctx, witURL, inviteToResource.ResourceID)
+		if err != nil {
+			return resourceID, redirectPath, err
+		}
+
+		userIDUUID, err := uuid.FromString(userID)
+		if err != nil {
+			return resourceID, redirectPath, err
+		}
+		user, err := s.Repositories().Identities().LoadWithUser(ctx, userIDUUID)
+		if err != nil {
+			return resourceID, redirectPath, err
+		}
+		redirectPath = fmt.Sprintf("%s/%s/%s", s.config.GetF8UIURL(), user.Username, spaceName)
 
 		// Delete the invitation
 		s.Repositories().InvitationRepository().Delete(ctx, inv.InvitationID)
 
-		// Return the resource ID
-		return inviteToResource.ResourceID, nil
+		// Return the resource ID and redirect path
+		return inviteToResource.ResourceID, redirectPath, nil
 	}
 
-	return "", nil
+	return "", "", nil
+}
+
+// SetWITRemoteService set wit
+func (s *invitationServiceImpl) SetWITRemoteService(w wit.RemoteWITService) {
+	s.RemoteWITService = w
 }

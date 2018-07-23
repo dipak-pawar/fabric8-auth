@@ -1411,6 +1411,10 @@ func (r *dummyRemoteWITService) CreateWITUser(ctx context.Context, identity *acc
 	return nil
 }
 
+func (r *dummyRemoteWITService) GetSpaceNameAndOwnedBy(ctx context.Context, witURL string, spaceID string) (name, ownedBy string, e error) {
+	return "", "", nil
+}
+
 type dummyKeycloakLinkService struct{}
 
 func (d *dummyKeycloakLinkService) Create(ctx context.Context, keycloakLinkIDPRequest *link.KeycloakLinkIDPRequest, protectedAccessToken string, keycloakIDPLinkURL string) error {

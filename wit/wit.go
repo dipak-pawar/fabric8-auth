@@ -14,6 +14,7 @@ import (
 	"github.com/fabric8-services/fabric8-auth/wit/witservice"
 
 	goaclient "github.com/goadesign/goa/client"
+	"github.com/goadesign/goa/uuid"
 	"github.com/pkg/errors"
 )
 
@@ -21,6 +22,7 @@ import (
 type RemoteWITService interface {
 	UpdateWITUser(ctx context.Context, updatePayload *app.UpdateUsersPayload, witURL string, identityID string) error
 	CreateWITUser(ctx context.Context, identity *account.Identity, witURL string, identityID string) error
+	GetSpaceNameAndOwnedBy(ctx context.Context, witURL string, spaceID string) (name, ownedBy string, e error)
 }
 
 type RemoteWITServiceCaller struct{}
@@ -28,7 +30,7 @@ type RemoteWITServiceCaller struct{}
 // UpdateWITUser updates user in WIT
 func (r *RemoteWITServiceCaller) UpdateWITUser(ctx context.Context, updatePayload *app.UpdateUsersPayload, witURL string, identityID string) error {
 
-	// Using the UpdateUserPayload because it also describes which attribtues are being updated and which are not.
+	// Using the UpdateUserPayload because it also describes which attributes are being updated and which are not.
 	updateUserPayload := &witservice.UpdateUserAsServiceAccountUsersPayload{
 		Data: &witservice.UpdateUserData{
 			Attributes: &witservice.UpdateIdentityDataAttributes{
@@ -39,8 +41,8 @@ func (r *RemoteWITServiceCaller) UpdateWITUser(ctx context.Context, updatePayloa
 				FullName:              updatePayload.Data.Attributes.FullName,
 				ImageURL:              updatePayload.Data.Attributes.ImageURL,
 				RegistrationCompleted: updatePayload.Data.Attributes.RegistrationCompleted,
-				URL:      updatePayload.Data.Attributes.URL,
-				Username: updatePayload.Data.Attributes.Username,
+				URL:                   updatePayload.Data.Attributes.URL,
+				Username:              updatePayload.Data.Attributes.Username,
 			},
 			Type: updatePayload.Data.Type,
 		},
@@ -112,6 +114,33 @@ func (r *RemoteWITServiceCaller) CreateWITUser(ctx context.Context, identity *ac
 	}
 	return nil
 
+}
+
+// GetSpaceNameAndOwnedBy talks to the WIT service to retrieve a space record for the specified spaceID, then
+// returns the name of the space
+func (r *RemoteWITServiceCaller) GetSpaceNameAndOwnedBy(ctx context.Context, witURL string, spaceID string) (name, ownedBy string, e error) {
+
+	remoteWITService, err := CreateSecureRemoteClientAsServiceAccount(ctx, witURL)
+	if err != nil {
+		return "", "", err
+	}
+
+	spaceIDUUID, err := uuid.FromString(spaceID)
+	if err != nil {
+		return "", "", err
+	}
+
+	response, err := remoteWITService.ShowSpace(ctx, witservice.ShowSpacePath(spaceIDUUID), nil, nil)
+	if err != nil {
+		return "", "", err
+	}
+
+	spaceSingle, err := remoteWITService.DecodeSpaceSingle(response)
+	if err != nil {
+		return "", "", err
+	}
+
+	return *spaceSingle.Data.Attributes.Name, spaceSingle.Data.Relationships.OwnedBy.Data.ID.String(), nil
 }
 
 // CreateSecureRemoteClientAsServiceAccount creates a client that would communicate with WIT service using a service account token.

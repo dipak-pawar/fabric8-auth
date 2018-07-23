@@ -15,16 +15,36 @@ import (
 	"github.com/satori/go.uuid"
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
+	"github.com/fabric8-services/fabric8-auth/app"
+	"context"
 )
 
 type invitationServiceBlackBoxTest struct {
 	gormtestsupport.DBTestSuite
-	invitationRepo invitationrepo.InvitationRepository
-	identityRepo   account.IdentityRepository
-	orgService     service.OrganizationService
-	witURL         string
+	invitationRepo   invitationrepo.InvitationRepository
+	identityRepo     account.IdentityRepository
+	orgService       service.OrganizationService
+	witURL           string
 }
 
+type dummyRemoteWITService struct {
+	userID   string
+}
+
+func (r *dummyRemoteWITService) UpdateWITUser(ctx context.Context, updatePayload *app.UpdateUsersPayload, witURL string, identityID string) error {
+	return nil
+}
+
+func (r *dummyRemoteWITService) CreateWITUser(ctx context.Context, identity *account.Identity, witURL string, identityID string) error {
+	return nil
+}
+
+func (r *dummyRemoteWITService) GetSpaceNameAndOwnedBy(ctx context.Context, witURL string, spaceID string) (name, ownedBy string, e error) {
+	return "my-testing-space", r.userID, nil
+}
+
+//TestRunInvitationServiceBlackBoxTest/TestAcceptSpaceInvitation
+//TestRunInvitationServiceBlackBoxTest/TestAcceptTeamRoleInvitation
 func TestRunInvitationServiceBlackBoxTest(t *testing.T) {
 	suite.Run(t, &invitationServiceBlackBoxTest{DBTestSuite: gormtestsupport.NewDBTestSuite()})
 }
@@ -309,6 +329,7 @@ func (s *invitationServiceBlackBoxTest) TestIssueInvitationFailsForNonMembership
 
 func (s *invitationServiceBlackBoxTest) TestIssueMultipleInvitations() {
 	g := s.NewTestGraph()
+
 	team := g.CreateTeam()
 	teamAdmin := g.CreateUser()
 
@@ -466,7 +487,7 @@ func (s *invitationServiceBlackBoxTest) TestAcceptTeamMembershipInvitation() {
 	user := s.Graph.CreateUser()
 	inv := s.Graph.CreateInvitation(team, user, true)
 
-	resourceID, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
+	resourceID, _, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
 	require.NoError(s.T(), err)
 
 	require.Equal(s.T(), team.ResourceID(), resourceID)
@@ -487,7 +508,7 @@ func (s *invitationServiceBlackBoxTest) TestAcceptTeamRoleInvitation() {
 	teamRole := s.Graph.CreateRole(s.Graph.LoadResourceType(authorization.IdentityResourceTypeTeam))
 	inv := s.Graph.CreateInvitation(team, user, false, teamRole)
 
-	resourceID, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
+	resourceID, _, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
 	require.NoError(s.T(), err)
 
 	require.Equal(s.T(), team.ResourceID(), resourceID)
@@ -504,12 +525,16 @@ func (s *invitationServiceBlackBoxTest) TestAcceptTeamRoleInvitation() {
 }
 
 func (s *invitationServiceBlackBoxTest) TestAcceptSpaceInvitation() {
+	spaceOwner := s.Graph.CreateUser()
 	space := s.Graph.CreateSpace()
 	user := s.Graph.CreateUser()
 	spaceRole := s.Graph.CreateRole(s.Graph.LoadResourceType(authorization.ResourceTypeSpace))
 	inv := s.Graph.CreateInvitation(space, user, spaceRole)
 
-	resourceID, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
+	invitationService := s.Application.InvitationService()
+
+	invitationService.SetWITRemoteService(&dummyRemoteWITService{spaceOwner.IdentityID().String()})
+	resourceID, _, err := invitationService.Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
 	require.NoError(s.T(), err)
 
 	require.Equal(s.T(), space.SpaceID(), resourceID)
@@ -524,7 +549,7 @@ func (s *invitationServiceBlackBoxTest) TestAcceptSpaceInvitation() {
 	require.Equal(s.T(), spaceRole.Role().Name, roles[0].Roles[0])
 
 	// Test that the accept code cannot be used again
-	resourceID, err = s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
+	resourceID, _, err = invitationService.Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
 	require.Error(s.T(), err)
 	require.IsType(s.T(), errors.NotFoundError{}, err)
 }
@@ -537,7 +562,7 @@ func (s *invitationServiceBlackBoxTest) TestAcceptFailsForIncorrectIdentity() {
 
 	otherUser := s.Graph.CreateUser()
 
-	_, err := s.Application.InvitationService().Accept(s.Ctx, otherUser.IdentityID(), inv.Invitation().AcceptCode)
+	_, _, err := s.Application.InvitationService().Accept(s.Ctx, otherUser.IdentityID(), inv.Invitation().AcceptCode)
 	require.Error(s.T(), err)
 	require.IsType(s.T(), errors.NotFoundError{}, err)
 }
@@ -548,6 +573,6 @@ func (s *invitationServiceBlackBoxTest) TestAcceptFailsForUnknownAcceptCode() {
 	spaceRole := s.Graph.CreateRole(s.Graph.LoadResourceType(authorization.ResourceTypeSpace))
 	s.Graph.CreateInvitation(space, user, spaceRole)
 
-	_, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), uuid.NewV4())
+	_, _, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), uuid.NewV4())
 	require.Error(s.T(), err)
 }
