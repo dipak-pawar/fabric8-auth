@@ -104,6 +104,7 @@ vwIDAQAB
 	devModeKeycloakURL   = "https://sso.prod-preview.openshift.io"
 	devModeKeycloakRealm = "fabric8-test"
 	devModeWITURL        = "http://localhost:8080"
+	devModeUIURL        = "http://localhost:8080"
 
 	// DefaultValidRedirectURLs is a regex to be used to whitelist redirect URL for auth
 	// If the AUTH_REDIRECT_VALID env var is not set then in Dev Mode all redirects allowed - *

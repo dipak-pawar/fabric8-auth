@@ -461,11 +461,14 @@ func (s *invitationServiceBlackBoxTest) TestIssueSpaceInvite() {
 }
 
 func (s *invitationServiceBlackBoxTest) TestAcceptTeamMembershipInvitation() {
+	spaceName := "my-test-space"
+	spaceOwner := s.Graph.CreateUser()
 	team := s.Graph.CreateTeam()
 	user := s.Graph.CreateUser()
 	inv := s.Graph.CreateInvitation(team, user, true)
 
-	resourceID, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
+	resourceID, redirectPath, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
+	require.Equal(s.T(), fmt.Sprintf("http://localhost/%s/%s", spaceOwner.Identity().Username, spaceName), redirectPath)
 	require.NoError(s.T(), err)
 
 	require.Equal(s.T(), team.ResourceID(), resourceID)
@@ -481,12 +484,16 @@ func (s *invitationServiceBlackBoxTest) TestAcceptTeamMembershipInvitation() {
 }
 
 func (s *invitationServiceBlackBoxTest) TestAcceptTeamRoleInvitation() {
+	spaceName := "my-test-space"
+	spaceOwner := s.Graph.CreateUser()
 	team := s.Graph.CreateTeam()
 	user := s.Graph.CreateUser()
 	teamRole := s.Graph.CreateRole(s.Graph.LoadResourceType(authorization.IdentityResourceTypeTeam))
 	inv := s.Graph.CreateInvitation(team, user, false, teamRole)
 
-	resourceID, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
+	resourceID, redirectPath, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
+
+	require.Equal(s.T(), fmt.Sprintf("http://localhost/%s/%s", spaceOwner.Identity().Username, spaceName), redirectPath)
 	require.NoError(s.T(), err)
 
 	require.Equal(s.T(), team.ResourceID(), resourceID)
@@ -503,14 +510,19 @@ func (s *invitationServiceBlackBoxTest) TestAcceptTeamRoleInvitation() {
 }
 
 func (s *invitationServiceBlackBoxTest) TestAcceptSpaceInvitation() {
+	spaceName := "my-test-space"
+	spaceOwner := s.Graph.CreateUser()
 	space := s.Graph.CreateSpace()
 	user := s.Graph.CreateUser()
 	spaceRole := s.Graph.CreateRole(s.Graph.LoadResourceType(authorization.ResourceTypeSpace))
 	inv := s.Graph.CreateInvitation(space, user, spaceRole)
 
-	resourceID, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
+	s.devWITService.OwnerID = spaceOwner.IdentityID()
+	s.devWITService.Name = spaceName
+	resourceID, redirectPath, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
 	require.NoError(s.T(), err)
 
+	require.Equal(s.T(), fmt.Sprintf("http://localhost/%s/%s", spaceOwner.Identity().Username, spaceName), redirectPath)
 	require.Equal(s.T(), space.SpaceID(), resourceID)
 
 	roles, err := s.Application.IdentityRoleRepository().FindIdentityRolesForIdentity(s.Ctx, user.IdentityID(), nil)
@@ -523,7 +535,8 @@ func (s *invitationServiceBlackBoxTest) TestAcceptSpaceInvitation() {
 	require.Equal(s.T(), spaceRole.Role().Name, roles[0].Roles[0])
 
 	// Test that the accept code cannot be used again
-	resourceID, err = s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
+	resourceID, redirectPath, err = s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), inv.Invitation().AcceptCode)
+	require.Equal(s.T(), "", redirectPath)
 	require.Error(s.T(), err)
 	require.IsType(s.T(), errors.NotFoundError{}, err)
 }
@@ -536,7 +549,8 @@ func (s *invitationServiceBlackBoxTest) TestAcceptFailsForIncorrectIdentity() {
 
 	otherUser := s.Graph.CreateUser()
 
-	_, err := s.Application.InvitationService().Accept(s.Ctx, otherUser.IdentityID(), inv.Invitation().AcceptCode)
+	_, redirectUrl, err := s.Application.InvitationService().Accept(s.Ctx, otherUser.IdentityID(), inv.Invitation().AcceptCode)
+	require.Empty(s.T(), redirectUrl, "Expecting redirected url to be empty for failed accepting invitation")
 	require.Error(s.T(), err)
 	require.IsType(s.T(), errors.NotFoundError{}, err)
 }
@@ -546,7 +560,8 @@ func (s *invitationServiceBlackBoxTest) TestAcceptFailsForUnknownAcceptCode() {
 	user := s.Graph.CreateUser()
 	spaceRole := s.Graph.CreateRole(s.Graph.LoadResourceType(authorization.ResourceTypeSpace))
 	s.Graph.CreateInvitation(space, user, spaceRole)
-	_, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), uuid.NewV4())
+	_, redirectUrl, err := s.Application.InvitationService().Accept(s.Ctx, user.IdentityID(), uuid.NewV4())
+	require.Empty(s.T(), redirectUrl, "Expecting redirected url to be empty for failed accepting invitation")
 	require.Error(s.T(), err)
 }
 

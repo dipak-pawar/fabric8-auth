@@ -23,6 +23,7 @@ import (
 
 type InvitationConfiguration interface {
 	GetAuthServiceURL() string
+	GetUIURL() string
 	IsPostgresDeveloperModeEnabled() bool
 }
 
@@ -342,21 +343,20 @@ func (s *invitationServiceImpl) Rescind(ctx context.Context, rescindingUserID, i
 }
 
 // Accept processes an invitation acceptance click, and returns the resource ID of the resource or identity resource which the invitation is for
-func (s *invitationServiceImpl) Accept(ctx context.Context, currentIdentityID uuid.UUID, token uuid.UUID) (string, error) {
-	var resourceID string
+func (s *invitationServiceImpl) Accept(ctx context.Context, currentIdentityID uuid.UUID, token uuid.UUID) (string, string, error) {
+	var resourceID, redirectPath string
 
 	// Locate the invitation
 	inv, err := s.Repositories().InvitationRepository().FindByAcceptCode(ctx, currentIdentityID, token)
 
 	if err != nil {
-		return resourceID, err
+		return resourceID, redirectPath, err
 	}
-
 	// If this invitation is for an identity
 	if inv.InviteTo != nil {
 		inviteToIdentity, err := s.Repositories().Identities().Load(ctx, *inv.InviteTo)
 		if err != nil {
-			return resourceID, err
+			return resourceID, redirectPath, err
 		}
 
 		// If the invitation is for a membership, add a membership record
@@ -366,7 +366,7 @@ func (s *invitationServiceImpl) Accept(ctx context.Context, currentIdentityID uu
 
 		roles, err := s.Repositories().InvitationRepository().ListRoles(ctx, inv.InvitationID)
 		if err != nil {
-			return resourceID, err
+			return resourceID, redirectPath, err
 		}
 
 		// If the invitation includes role assignments, assign them
@@ -379,25 +379,34 @@ func (s *invitationServiceImpl) Accept(ctx context.Context, currentIdentityID uu
 
 			err = s.Repositories().IdentityRoleRepository().Create(ctx, ir)
 			if err != nil {
-				return resourceID, err
+				return resourceID, redirectPath, err
+			}
+		}
+
+		if inviteToIdentity.IdentityResource.ResourceType.Name == authorization.IdentityResourceTypeTeam {
+			if inviteToIdentity.IdentityResource.ParentResourceID != nil {
+				redirectPath, e := s.getRedirectPath(ctx, *inviteToIdentity.IdentityResource.ParentResourceID)
+				if e != nil {
+					return resourceID, redirectPath, err
+				}
 			}
 		}
 
 		// Delete the invitation
 		s.Repositories().InvitationRepository().Delete(ctx, inv.InvitationID)
 
-		// Return the identity ID
-		return inviteToIdentity.IdentityResourceID.String, nil
+		// Return the identity ID and redirect Path
+		return inviteToIdentity.IdentityResourceID.String, redirectPath, nil
 
 	} else if inv.ResourceID != nil {
 		inviteToResource, err := s.Repositories().ResourceRepository().Load(ctx, *inv.ResourceID)
 		if err != nil {
-			return resourceID, err
+			return resourceID, redirectPath, err
 		}
 
 		roles, err := s.Repositories().InvitationRepository().ListRoles(ctx, inv.InvitationID)
 		if err != nil {
-			return resourceID, err
+			return resourceID, redirectPath, err
 		}
 
 		for _, role := range roles {
@@ -409,16 +418,43 @@ func (s *invitationServiceImpl) Accept(ctx context.Context, currentIdentityID uu
 
 			err = s.Repositories().IdentityRoleRepository().Create(ctx, ir)
 			if err != nil {
-				return resourceID, err
+				return resourceID, redirectPath, err
 			}
+		}
+
+		redirectPath, e := s.getRedirectPath(ctx, inviteToResource.ResourceID)
+		if e != nil {
+			return resourceID, redirectPath, err
 		}
 
 		// Delete the invitation
 		s.Repositories().InvitationRepository().Delete(ctx, inv.InvitationID)
 
-		// Return the resource ID
-		return inviteToResource.ResourceID, nil
+		// Return the resource ID and redirect path
+		return inviteToResource.ResourceID, redirectPath, nil
 	}
 
-	return "", nil
+	return resourceID, redirectPath, nil
+}
+
+func (s *invitationServiceImpl) getRedirectPath(ctx context.Context, spaceID string) (string, error) {
+	var redirectPath string
+	witService := s.Services().WITService()
+	fmt.Println(witService)
+	space, err := s.Services().WITService().GetSpace(ctx, spaceID)
+	if err != nil {
+		return redirectPath, err
+	}
+
+	ownerUUID, err := uuid.FromString(space.OwnerID.String())
+	if err != nil {
+		return redirectPath, err
+	}
+
+	user, err := s.Repositories().Identities().LoadWithUser(ctx, ownerUUID)
+	if err != nil {
+		return redirectPath, err
+	}
+
+	return fmt.Sprintf("%s/%s/%s", s.config.GetUIURL(), user.Username, space.Name), nil
 }

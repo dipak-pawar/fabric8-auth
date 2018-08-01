@@ -18,8 +18,9 @@ import (
 	"github.com/fabric8-services/fabric8-auth/application/service/base"
 	"github.com/fabric8-services/fabric8-auth/wit"
 	goaclient "github.com/goadesign/goa/client"
-	"github.com/goadesign/goa/uuid"
+	goauuid "github.com/goadesign/goa/uuid"
 	"github.com/pkg/errors"
+	"github.com/satori/go.uuid"
 )
 
 // DevWITService is the default dev service implementation for WIT.
@@ -39,7 +40,18 @@ func (s *DevWITService) CreateWITUser(ctx context.Context, identity *account.Ide
 }
 
 func (s *DevWITService) GetSpace(ctx context.Context, spaceID string) (space wit.Space, e error) {
-	return wit.Space{s.SpaceID, s.OwnerID, s.Name, s.Description}, nil
+	var sp wit.Space
+	spaceId, e := goauuid.FromString(s.SpaceID.String())
+	if e != nil {
+		return sp, e
+	}
+
+	ownerId, e := goauuid.FromString(s.OwnerID.String())
+	if e != nil {
+		return sp, e
+	}
+
+	return wit.Space{spaceId, ownerId, s.Name, s.Description}, nil
 }
 
 // witServiceImpl is the default implementation of WITService.
@@ -71,8 +83,8 @@ func (r *witServiceImpl) UpdateWITUser(ctx context.Context, updatePayload *app.U
 				FullName:              updatePayload.Data.Attributes.FullName,
 				ImageURL:              updatePayload.Data.Attributes.ImageURL,
 				RegistrationCompleted: updatePayload.Data.Attributes.RegistrationCompleted,
-				URL:      updatePayload.Data.Attributes.URL,
-				Username: updatePayload.Data.Attributes.Username,
+				URL:                   updatePayload.Data.Attributes.URL,
+				Username:              updatePayload.Data.Attributes.Username,
 			},
 			Type: updatePayload.Data.Type,
 		},
@@ -163,7 +175,7 @@ func (r *witServiceImpl) GetSpace(ctx context.Context, spaceID string) (space wi
 		return s, err
 	}
 
-	spaceIDUUID, err := uuid.FromString(spaceID)
+	spaceIDUUID, err := goauuid.FromString(spaceID)
 	if err != nil {
 		return s, err
 	}
